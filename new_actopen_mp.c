@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <omp.h>  // Include OpenMP header
 
 #define WIDTH 640
@@ -14,7 +15,7 @@ int main(int argc, char *argv[]) {
     }
 
     const char *csv_filename = NULL;
-    int num_threads = omp_get_max_threads();  // Default to the maximum number of available threads
+    int num_threads = 1;  // Default to 1 thread
 
     // Parse arguments
     for (int i = 1; i < argc; i++) {
@@ -41,14 +42,55 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // Find the total number of lines in the file
+    // Step 1: Count total lines (M) in the CSV file
+    int total_lines = 0;
+    char line[1024]; // Buffer to store each line
+
+    while (fgets(line, sizeof(line), file) != NULL) {
+        total_lines++;
+    }
+
+    printf("Total Lines: %d\n", total_lines);
+
+    // Step 2: Determine lines per thread (K)
+    int lines_per_thread = total_lines / num_threads;
+    if (total_lines % num_threads != 0) {
+        lines_per_thread++;  // To handle any remaining lines
+    }
+
+    printf("Lines per Thread: %d\n", lines_per_thread);
+
+    // Step 3: Create an array to store the start positions
+    long *start_positions = malloc((num_threads + 1) * sizeof(long));
+
+    if (!start_positions) {
+        printf("Error: Memory allocation failed.\n");
+        fclose(file);
+        return 1;
+    }
+
+    // Step 4: Calculate the starting byte position for each thread
+    rewind(file); // Reset the file pointer to the beginning of the file
+
+    int current_line = 0;
+    int current_thread = 0;
+    start_positions[current_thread] = ftell(file); // Starting position of the first thread
+
+    while (fgets(line, sizeof(line), file) != NULL) {
+        if (current_line == (current_thread + 1) * lines_per_thread) {
+            start_positions[++current_thread] = ftell(file);
+        }
+        current_line++;
+    }
+
+    rewind(file); // Reset the file pointer to the beginning of the file
     fseek(file, 0, SEEK_END);
     long file_size = ftell(file);
     fseek(file, 0, SEEK_SET);
+    start_positions[num_threads] = file_size;
 
     // Read the very first timestamp
     unsigned long long first_timestamp = 0;
-    char line[256];
     if (fgets(line, sizeof(line), file)) {
         unsigned long long timestamp;
         int x, y;
@@ -61,8 +103,13 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // Determine the size of each part for the threads
-    long part_size = file_size / num_threads;
+    // Debug: Print start positions for each thread
+    for (int i = 0; i < num_threads; i++) {
+        printf("Start position for thread %d: %ld\n", i, start_positions[i]);
+    }
+    printf("End position: %ld\n", start_positions[num_threads]);
+
+    fclose(file);  // Close the shared file pointer since each thread will open its own
 
     // Initialize arrays for counting occurrences
     unsigned int occurrences[MILLIS] = {0};  // Final array to store the results
@@ -78,31 +125,31 @@ int main(int argc, char *argv[]) {
     #pragma omp parallel
     {
         int thread_id = omp_get_thread_num();
-        long start_pos = thread_id * part_size;
-        long end_pos = (thread_id == num_threads - 1) ? file_size : (thread_id + 1) * part_size;
+        long start_pos = start_positions[thread_id];
+        long end_pos = start_positions[thread_id + 1];
         unsigned long long last_timestamp = 0;
         int is_first_row = 1;
 
-        // Move to the starting position of this thread's part
-        fseek(file, start_pos, SEEK_SET);
-
-        // If not the first thread, adjust the start position to the beginning of the next line
-        if (thread_id > 0) {
-            char ch;
-            while ((ch = fgetc(file)) != '\n' && ch != EOF);
+        // Open the file separately in each thread
+        FILE *local_file = fopen(csv_filename, "r");
+        if (!local_file) {
+            printf("Error: Thread %d could not open file %s\n", thread_id, csv_filename);
         }
+
+        // Move to the starting position of this thread's part
+        fseek(local_file, start_pos, SEEK_SET);
 
         double start_time = omp_get_wtime();  // Measure time taken by each thread
 
         // Read the part assigned to this thread
-        while (ftell(file) < end_pos && fgets(line, sizeof(line), file)) {
+        while (ftell(local_file) < end_pos && fgets(line, sizeof(line), local_file)) {
             unsigned long long timestamp;
             int x, y;
 
             if (sscanf(line, "%llu,%d,%d,%*d", &timestamp, &x, &y) == 3) {
                 if (is_first_row) {
                     is_first_row = 0;
-                    printf("%s\n", line);
+                    printf("First row for Thread %i: %s\n", thread_id, line);
                 }
 
                 last_timestamp = timestamp;
@@ -118,17 +165,15 @@ int main(int argc, char *argv[]) {
         double end_time = omp_get_wtime();  // End time measurement
 
         printf("Thread %d processed its part in %.6f seconds\n", thread_id, end_time - start_time);
-    }
 
-    fclose(file);
+        // Close the file after processing is done
+        fclose(local_file);
+    }
 
     // Combine the results from all threads
     for (int i = 0; i < num_threads; i++) {
         for (int j = 0; j < MILLIS; j++) {
             occurrences[j] += occurrences_private[i * MILLIS + j];
-            if (occurrences_private[i * MILLIS + j]>0){
-                printf("Thread %d: Element %d: %d\n", i, j, occurrences_private[i * MILLIS + j]);
-            }
         }
     }
 
@@ -144,5 +189,7 @@ int main(int argc, char *argv[]) {
 
     printf("Occurrences data saved to occurrences.bin\n");
     free(occurrences_private);
+    free(start_positions);
+
     return 0;
 }
