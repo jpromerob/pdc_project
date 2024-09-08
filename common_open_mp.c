@@ -5,21 +5,67 @@
 #include <omp.h>  // Include OpenMP header
 #include <time.h>
 #include <sys/time.h>  // For gettimeofday
+#include <dirent.h>
+#include <sys/types.h>
 
 #define WIDTH 640
 #define HEIGHT 480
 #define MILLIS 10000  // Number of milliseconds for the output array
 #define EVENT_SIZE_BYTES 12  // Each event is 96 bits = 12 bytes
-
-// #define DEBUGGER
-
 #define MAX_FILENAME_LENGTH 256
+#define MAX_FILES 1000  // Max Expected Nbr of Files
 
+// Structure to store file names and count
+typedef struct {
+    char file_names[MAX_FILES][MAX_FILENAME_LENGTH];
+    int nb_files;
+} FileList;
 
-// Function prototypes
-void get_base_name(const char *input_filename, char *base_name);
-int parse_arguments(int argc, char *argv[], const char **bin_filename);
-void calculate_start_positions(int num_threads, unsigned int total_events, long **start_positions);
+int parse_arguments(int argc, char *argv[], const char **folder_path) {
+    if (argc < 2) {
+        printf("Usage: %s --folder <folder_path>\n", argv[0]);
+        return 1;
+    }
+
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--folder") == 0 && i + 1 < argc) {
+            *folder_path = argv[i + 1];
+            return 0;
+        }
+    }
+
+    printf("Error: Folder path not specified.\n");
+    return 1;
+}
+
+int scan_directory(const char *folder_path, FileList *file_list) {
+    DIR *dir;
+    struct dirent *entry;
+    int count = 0;
+
+    dir = opendir(folder_path);
+    if (dir == NULL) {
+        perror("opendir");
+        return -1;
+    }
+
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_type == DT_REG) {  // Regular file
+            if (count < MAX_FILES) {
+                strncpy(file_list->file_names[count], entry->d_name, MAX_FILENAME_LENGTH - 1);
+                file_list->file_names[count][MAX_FILENAME_LENGTH - 1] = '\0';  // Ensure null-termination
+                count++;
+            } else {
+                printf("Warning: Maximum number of files exceeded.\n");
+                break;
+            }
+        }
+    }
+
+    closedir(dir);
+    file_list->nb_files = count;
+    return 0;
+}
 
 // Function implementations
 void get_base_name(const char *input_filename, char *base_name) {
@@ -35,23 +81,6 @@ void get_base_name(const char *input_filename, char *base_name) {
     
     strncpy(base_name, last_slash + 1, dot - last_slash - 1);
     base_name[dot - last_slash - 1] = '\0';
-}
-
-int parse_arguments(int argc, char *argv[], const char **bin_filename) {
-    if (argc < 2) {
-        printf("Usage: %s --file <bin_filename>\n", argv[0]);
-        return 1;
-    }
-
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--file") == 0 && i + 1 < argc) {
-            *bin_filename = argv[i + 1];
-            return 0;
-        }
-    }
-
-    printf("Error: BIN file not specified.\n");
-    return 1;
 }
 
 
@@ -80,8 +109,11 @@ void calculate_start_positions(int num_threads, unsigned int total_events, long 
 int main(int argc, char *argv[]) {
 
     double all_start_time, all_end_time;
-    const char *bin_filename = NULL;
+    char bin_filename[MAX_FILENAME_LENGTH] = {0};
+    const char *folder_path = NULL;
+    FileList file_list = {0};  // Initialize with zero files
     char base_name[MAX_FILENAME_LENGTH];
+    char input_filename[MAX_FILENAME_LENGTH];
     char output_filename[MAX_FILENAME_LENGTH];
     unsigned int total_events;
     int num_threads = 1;
@@ -94,12 +126,28 @@ int main(int argc, char *argv[]) {
 
     all_start_time = omp_get_wtime();
 
-    if (parse_arguments(argc, argv, &bin_filename) != 0) {
+
+    if (parse_arguments(argc, argv, &folder_path) != 0) {
         return 1;
     }
 
+    if (scan_directory(folder_path, &file_list) != 0) {
+        return 1;
+    }
+
+    printf("Files found:\n");
+    for (int i = 0; i < file_list.nb_files; i++) {
+        printf("%s\n", file_list.file_names[i]);
+    }
+
+
+    strncpy(bin_filename, file_list.file_names[0], MAX_FILENAME_LENGTH - 1);
+
     // Extract base name from input file
     get_base_name(bin_filename, base_name);
+
+    snprintf(input_filename, sizeof(input_filename), "%s/%s", folder_path, bin_filename);
+    
 
     // Construct the output file name
     #ifdef HISTOGRAMS
@@ -113,9 +161,9 @@ int main(int argc, char *argv[]) {
     printf("Output File Name: %s\n", output_filename);
 
     // Open the BIN file
-    FILE *file = fopen(bin_filename, "rb");
+    FILE *file = fopen(input_filename, "rb");
     if (!file) {
-        printf("Error: Could not open input file %s\n", bin_filename);
+        printf("Error: Could not open input file %s\n", input_filename);
         return 1;
     }
 
@@ -185,9 +233,9 @@ int main(int argc, char *argv[]) {
         long end_pos = start_positions[thread_id + 1];
 
         // Open the file separately in each thread
-        FILE *local_file = fopen(bin_filename, "rb");
+        FILE *local_file = fopen(input_filename, "rb");
         if (!local_file) {
-            printf("Error: Thread %d could not open file %s\n", thread_id, bin_filename);
+            printf("Error: Thread %d could not open file %s\n", thread_id, input_filename);
         }
 
         // Move to the starting position of this thread's part
