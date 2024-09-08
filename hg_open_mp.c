@@ -14,7 +14,6 @@
 
 // #define DEBUGGER
 
-
 #define MAX_FILENAME_LENGTH 256
 
 // Function to extract base name without directory and extension
@@ -164,7 +163,10 @@ int main(int argc, char *argv[]) {
     omp_set_num_threads(num_threads);
 
 
-    // Start parallel processing
+
+
+
+    // START OF MAIN PROCESSING 
     #pragma omp parallel
     {
         int thread_id = omp_get_thread_num();
@@ -237,7 +239,19 @@ int main(int argc, char *argv[]) {
             occurrences[j] += occurrences_private[i * MILLIS + j];
         }
     }
+    // END OF MAIN PROCESSING 
     
+
+
+
+
+
+
+
+
+
+
+
 
     // Output the combined occurrences array
     FILE *output_file = fopen(output_filename, "wb");

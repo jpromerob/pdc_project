@@ -60,24 +60,17 @@ int main(int argc, char *argv[]) {
     double all_start_time, all_end_time;
     all_start_time = omp_get_wtime();
 
-    if (argc < 3) {
-        printf("Usage: %s --file <bin_filename> [--threads <num_threads>]\n", argv[0]);
+    if (argc < 2) {
+        printf("Usage: %s --file <bin_filename>\n", argv[0]);
         return 1;
     }
 
     const char *bin_filename = NULL;
-    int num_threads = 1;  // Default to 1 thread
 
     // Parse arguments
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--file") == 0 && i + 1 < argc) {
             bin_filename = argv[i + 1];
-        } else if (strcmp(argv[i], "--threads") == 0 && i + 1 < argc) {
-            num_threads = atoi(argv[i + 1]);  // Convert the number of threads from string to int
-            if (num_threads <= 0) {
-                printf("Error: Number of threads must be a positive integer.\n");
-                return 1;
-            }
         }
     }
 
@@ -107,6 +100,10 @@ int main(int argc, char *argv[]) {
     unsigned int total_events;
     fread(&total_events, sizeof(unsigned int), 1, file);
     printf("Total Events: %u\n", total_events);
+
+    // Determine the number of OpenMP threads
+    int num_threads = omp_get_max_threads();  // Use maximum number of threads allowed by OpenMP runtime
+    printf("Available Threads: %d\n", num_threads);
 
     // Determine events per thread
     int events_per_thread = total_events / num_threads;
@@ -144,8 +141,13 @@ int main(int argc, char *argv[]) {
 
     fclose(file);  // Close the shared file pointer since each thread will open its own
 
-    // Set the number of OpenMP threads
-    omp_set_num_threads(num_threads);
+
+
+
+
+
+
+    // PREPARING FOR PARALLELIZATION
 
     // Allocate a contiguous block for the entire 3D matrix
     unsigned int ***heatmap_3d = (unsigned int ***)malloc(num_threads * sizeof(unsigned int **));
@@ -168,6 +170,10 @@ int main(int argc, char *argv[]) {
             heatmap_3d[i][j] = data_block + (i * WIDTH * HEIGHT) + (j * HEIGHT);
         }
     }
+
+
+
+    
 
     // START OF MAIN PROCESSING 
     #pragma omp parallel
