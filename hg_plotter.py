@@ -6,7 +6,7 @@ def plot_occurrences(file_path, output_png):
     data = np.fromfile(file_path, dtype=np.uint32)
     
     # Define the number of milliseconds (1000)
-    num_milliseconds = 1000
+    num_milliseconds = 10000
     
     if len(data) != num_milliseconds:
         raise ValueError(f"Expected {num_milliseconds} elements, but found {len(data)}")
