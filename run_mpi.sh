@@ -4,7 +4,7 @@
 #SBATCH --partition=main           # Partition name
 #SBATCH --nodes=4                  # Number of nodes
 #SBATCH --ntasks-per-node=1        # Number of tasks per node
-#SBATCH --cpus-per-task=100        # Number of CPUs per task
+#SBATCH --cpus-per-task=10        # Number of CPUs per task
 #SBATCH --time=00:10:00            # Maximum run time (hh:mm:ss)
 #SBATCH --output=output_mpi_openmp_%j.txt  # Output file name (%j will be replaced by job ID)
 

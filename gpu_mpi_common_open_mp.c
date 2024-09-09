@@ -377,12 +377,21 @@ int main(int argc, char *argv[]) {
         /*                       CONSOLIDATING DATA FROM OPEN_MP PROCESSES                          */
         /********************************************************************************************/
 
+
+
         #ifdef HISTOGRAMS
         unsigned int occurrences[MILLIS] = {0};  // Final array to store the results
-        // Combine the results from all threads
-        for (int i = 0; i < num_threads; i++) {
+
+        #pragma omp target data map(to: occurrences_private[0:num_threads * MILLIS]) \
+                            map(from: occurrences[0:MILLIS])
+        {
+            #pragma omp target teams distribute parallel for reduction(+:occurrences[:MILLIS])
             for (int j = 0; j < MILLIS; j++) {
-                occurrences[j] += occurrences_private[i * MILLIS + j];
+                unsigned int sum = 0;
+                for (int i = 0; i < num_threads; i++) {
+                    sum += occurrences_private[i * MILLIS + j];
+                }
+                occurrences[j] = sum;
             }
         }
         #endif
@@ -391,8 +400,7 @@ int main(int argc, char *argv[]) {
             // Allocate a contiguous block for the 2D matrix
             unsigned int *data_block_2d = (unsigned int *)malloc(WIDTH * HEIGHT * sizeof(unsigned int));
             unsigned int **heatmap_2d = (unsigned int **)malloc(WIDTH * sizeof(unsigned int *));
-
-            // Initialize the entire block to 0 using memset
+            
             memset(data_block_2d, 0, WIDTH * HEIGHT * sizeof(unsigned int));
 
             // Set up the pointers for the 2D array
@@ -400,11 +408,17 @@ int main(int argc, char *argv[]) {
                 heatmap_2d[i] = data_block_2d + (i * HEIGHT);
             }
 
-            // Sum heatmap_3d along the thread dimension
-            for (int i = 0; i < num_threads; i++) {
+            #pragma omp target data map(to: heatmap_3d[0:num_threads * WIDTH * HEIGHT]) \
+                                map(from: heatmap_2d[0:WIDTH * HEIGHT])
+            {
+                #pragma omp target teams distribute parallel for
                 for (int x = 0; x < WIDTH; x++) {
                     for (int y = 0; y < HEIGHT; y++) {
-                        heatmap_2d[x][y] += heatmap_3d[i][x][y];
+                        unsigned int sum = 0;
+                        for (int i = 0; i < num_threads; i++) {
+                            sum += heatmap_3d[i][x][y];
+                        }
+                        heatmap_2d[x][y] = sum;
                     }
                 }
             }
