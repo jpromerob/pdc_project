@@ -1,20 +1,32 @@
 #!/bin/bash
-#SBATCH --job-name=mpi_openmp_job  # Job name
-#SBATCH --account=edu24.summer     # Account name
-#SBATCH --partition=main           # Partition name
-#SBATCH --nodes=4                  # Number of nodes
-#SBATCH --ntasks-per-node=1        # Number of tasks per node
-#SBATCH --cpus-per-task=10        # Number of CPUs per task
-#SBATCH --time=00:10:00            # Maximum run time (hh:mm:ss)
-#SBATCH --output=output_mpi_openmp_%j.txt  # Output file name (%j will be replaced by job ID)
 
+# Define different configurations
+cpus_per_task_list=(2 4 8 16 32 48 64 80 96 112 128)
+nodes_list=(1 2 3 4)
 
-# Print the node list and job details
-echo "Running on nodes:"
-scontrol show hostname $SLURM_JOB_NODELIST
-echo "Number of nodes: $SLURM_JOB_NUM_NODES"
-echo "Tasks per node: $SLURM_NTASKS_PER_NODE"
-echo "CPUs per task: $SLURM_CPUS_PER_TASK"
+# Loop through configurations and run the MPI program
+for nodes in "${nodes_list[@]}"; do
+    for cpus_per_task in "${cpus_per_task_list[@]}"; do
+        echo "Running with --nodes=$nodes and --cpus-per-task=$cpus_per_task"
 
-# Run the MPI program
-srun ./mpi_hg_open_mp.exe --folder events
+        ############################################
+        #                 Heatmaps                 #
+        ############################################
+
+        # Run the MPI program using GPU offload
+        srun -A edu24.summer -t 00:10:00 -p main --nodes=$nodes --ntasks-per-node=1 --cpus-per-task=$cpus_per_task ./gpu_mpi_hm_open_mp.exe --folder events
+
+        # Run the MPI program without GPU offload
+        srun -A edu24.summer -t 00:10:00 -p main --nodes=$nodes --ntasks-per-node=1 --cpus-per-task=$cpus_per_task ./mpi_hm_open_mp.exe --folder events
+
+        ############################################
+        #                Histograms                #
+        ############################################
+
+        # Run the MPI program using GPU offload
+        srun -A edu24.summer -t 00:10:00 -p main --nodes=$nodes --ntasks-per-node=1 --cpus-per-task=$cpus_per_task ./gpu_mpi_hg_open_mp.exe --folder events
+
+        # Run the MPI program without GPU offload
+        srun -A edu24.summer -t 00:10:00 -p main --nodes=$nodes --ntasks-per-node=1 --cpus-per-task=$cpus_per_task ./mpi_hg_open_mp.exe --folder events
+    done
+done

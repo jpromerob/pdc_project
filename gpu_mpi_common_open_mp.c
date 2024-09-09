@@ -112,11 +112,11 @@ void calculate_start_positions(int num_threads, unsigned int total_events, long 
 }
 
 // Function to find the file indices corresponding to a given rank
-int* files_for_rank(int numfiles, int numtasks, int rank, int* num_files_for_rank) {
+int* files_for_rank(int numfiles, int num_tasks, int rank, int* num_files_for_rank) {
     // Count the number of files assigned to this rank
     *num_files_for_rank = 0;
     for (int i = 0; i < numfiles; i++) {
-        if (i % numtasks == rank) {
+        if (i % num_tasks == rank) {
             (*num_files_for_rank)++;
         }
     }
@@ -131,7 +131,7 @@ int* files_for_rank(int numfiles, int numtasks, int rank, int* num_files_for_ran
     // Fill the array with the file indices for this rank
     int idx = 0;
     for (int i = 0; i < numfiles; i++) {
-        if (i % numtasks == rank) {
+        if (i % num_tasks == rank) {
             file_indices[idx++] = i;
         }
     }
@@ -144,10 +144,16 @@ int main(int argc, char *argv[]) {
     const char *folder_path = NULL;
     FileList file_list = {0};  // Initialize with zero files
     
-    int numtasks, rank, rc;
+    int num_tasks, rank, rc;
     double mpi_start_time, mpi_end_time, mpi_elapsed_time, mpi_max_elapsed_time;
 
-    
+    #ifdef HISTOGRAMS
+        printf("This program creates Histograms\n");
+    #endif
+
+    #ifdef HEATMAPS
+        printf("This program creates Heatmaps\n");
+    #endif
 
     
     // Initialize MPI
@@ -161,14 +167,19 @@ int main(int argc, char *argv[]) {
     mpi_start_time = MPI_Wtime();
 
     // Get the number of MPI tasks and the rank of this process
-    MPI_Comm_size(MPI_COMM_WORLD, &numtasks);
+    MPI_Comm_size(MPI_COMM_WORLD, &num_tasks);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+    printf("Available MPI tasks: %d\n", num_tasks);
 
     /********************************************************************************************/
     /*           PARSING ARGUMENTS, SETTING OUTPUT FILE NAMES, OPENING INPUT FILE, ETC          */
     /********************************************************************************************/
 
 
+    int num_threads = 1;
+    num_threads = omp_get_max_threads();  // Use maximum number of threads allowed by OpenMP runtime
+    printf("Available OpenMP Threads: %d\n", num_threads);
 
     if (rank == 0) {
         if (parse_arguments(argc, argv, &folder_path) != 0) {
@@ -179,7 +190,7 @@ int main(int argc, char *argv[]) {
             return 1;
         }
 
-        printf("%d Files found:\n", file_list.nb_files);
+        printf("Files found: %d\n", file_list.nb_files);
     }
 
     // Broadcast the file list to all processes from process 0
@@ -188,10 +199,11 @@ int main(int argc, char *argv[]) {
 
     
     int num_files_for_rank; // To hold the number of files for this rank
-    int* file_idxs = files_for_rank(file_list.nb_files, numtasks, rank, &num_files_for_rank);
+    int* file_idxs = files_for_rank(file_list.nb_files, num_tasks, rank, &num_files_for_rank);
 
     for (int i = 0; i < num_files_for_rank; i++) {
 
+        
         printf("Rank %d : File %s\n", rank, file_list.file_names[file_idxs[i]]);
         
         char bin_filename[MAX_FILENAME_LENGTH] = {0};
@@ -242,12 +254,7 @@ int main(int argc, char *argv[]) {
             printf("*** Very First Timestamp: %lu\n", first_timestamp);
         #endif
 
-        
-        int num_threads = 1;
-        num_threads = omp_get_max_threads();  // Use maximum number of threads allowed by OpenMP runtime
-        printf("Available OpenMP Threads: %d\n", num_threads);
-
-        
+                
         long *start_positions;
         calculate_start_positions(num_threads, total_events, &start_positions);
 
@@ -381,14 +388,17 @@ int main(int argc, char *argv[]) {
         #ifdef HISTOGRAMS
         unsigned int occurrences[MILLIS] = {0};  // Final array to store the results
 
+
+            /****************************************************************************************/
+            /*                            OFFLOADING ARRAY OPERATION TO GPU                         */
+            /****************************************************************************************/
+            #ifdef OFFLOADGPU
             #pragma omp target data map(to: occurrences_private[0:num_threads * MILLIS]) \
                                 map(from: occurrences[0:MILLIS])
             {
                 
-                /****************************************************************************************/
-                /*                            OFFLOADING ARRAY OPERATION TO GPU                         */
-                /****************************************************************************************/
                 #pragma omp target teams distribute parallel for reduction(+:occurrences[:MILLIS])
+            #endif // OFFLOADGPU
                 for (int j = 0; j < MILLIS; j++) {
                     unsigned int sum = 0;
                     for (int i = 0; i < num_threads; i++) {
@@ -401,7 +411,9 @@ int main(int argc, char *argv[]) {
                         }
                     #endif
                 }
+            #ifdef OFFLOADGPU
             }
+            #endif // OFFLOADGPU
         #endif
 
         #ifdef HEATMAPS
@@ -419,10 +431,12 @@ int main(int argc, char *argv[]) {
             /****************************************************************************************/
             /*                            OFFLOADING MATRIX OPERATION TO GPU                        */
             /****************************************************************************************/
+            #ifdef OFFLOADGPU
             #pragma omp target data map(to: heatmap_3d[0:num_threads * WIDTH * HEIGHT]) \
                                 map(from: heatmap_2d[0:WIDTH * HEIGHT])
             {
                 #pragma omp target teams distribute parallel for
+            #endif // OFFLOADGPU
                 for (int x = 0; x < WIDTH; x++) {
                     for (int y = 0; y < HEIGHT; y++) {
                         unsigned int sum = 0;
@@ -432,7 +446,9 @@ int main(int argc, char *argv[]) {
                         heatmap_2d[x][y] = sum;
                     }
                 }
+            #ifdef OFFLOADGPU
             }
+            #endif // OFFLOADGPU
 
         #endif
 
@@ -484,12 +500,6 @@ int main(int argc, char *argv[]) {
 
     free(file_idxs); // Free the allocated memory
 
-    // Synchronize and gather messages from all processes to process 0
-    if (rank == 0) {
-        // Collect messages from other processes
-        printf("This is it my friend\n");
-    }
-
     // Record the end time
     mpi_end_time = MPI_Wtime();
 
@@ -507,8 +517,42 @@ int main(int argc, char *argv[]) {
         printf("***************************************************\n");
     }
 
+    // Synchronize and gather messages from all processes to process 0
+    if (rank == 0) {
+        // Collect messages from other processes
+        printf("This is it my friend\n");
+        
+        #ifdef HISTOGRAMS
+        const char *file_name = "summary_histograms.csv";
+        #endif
+        
+        #ifdef HEATMAPS
+        const char *file_name = "summary_heatmaps.csv";
+        #endif
+
+        // Open the CSV file in append mode
+        FILE *summary_file = fopen(file_name, "a");
+        if (summary_file == NULL) {
+            perror("Error opening file");
+            return EXIT_FAILURE;
+        }
+
+        int gpu_flag = 0;    
+        #ifdef OFFLOADGPU
+        gpu_flag = 1;
+        #endif // OFFLOADGPU
+
+        // Append the random data to the CSV file
+        fprintf(summary_file, "%d,%d,%d,%.6f\n", num_tasks, num_threads, gpu_flag, mpi_max_elapsed_time);
+
+        // Close the file
+        fclose(summary_file);
+    }
+
     // Finalize MPI
     MPI_Finalize();
+
+
 
     return 0;
 }
