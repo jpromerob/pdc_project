@@ -184,7 +184,6 @@ int main(int argc, char *argv[]) {
 
     // Broadcast the file list to all processes from process 0
     MPI_Bcast(&file_list, sizeof(FileList), MPI_BYTE, 0, MPI_COMM_WORLD);
-    MPI_Bcast(&file_list, sizeof(FileList), MPI_BYTE, 0, MPI_COMM_WORLD);
 
 
     

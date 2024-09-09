@@ -184,7 +184,6 @@ int main(int argc, char *argv[]) {
 
     // Broadcast the file list to all processes from process 0
     MPI_Bcast(&file_list, sizeof(FileList), MPI_BYTE, 0, MPI_COMM_WORLD);
-    MPI_Bcast(&file_list, sizeof(FileList), MPI_BYTE, 0, MPI_COMM_WORLD);
 
 
     
@@ -237,6 +236,13 @@ int main(int argc, char *argv[]) {
         printf("Total Events: %u\n", total_events);
 
         
+        uint64_t first_timestamp = 0;
+        fread(&first_timestamp, sizeof(uint64_t), 1, file);
+        #ifdef DEBUGGER
+            printf("*** Very First Timestamp: %lu\n", first_timestamp);
+        #endif
+
+        
         int num_threads = 1;
         num_threads = omp_get_max_threads();  // Use maximum number of threads allowed by OpenMP runtime
         printf("Available OpenMP Threads: %d\n", num_threads);
@@ -287,13 +293,14 @@ int main(int argc, char *argv[]) {
         #endif
 
 
-
-
         
         /********************************************************************************************/
         /*                            PARALLEL-PROCESSING WITH OPEN_MP                              */
         /********************************************************************************************/
         
+        // Set the number of OpenMP threads
+        omp_set_num_threads(num_threads);
+
         #pragma omp parallel // START OF MAIN PROCESSING
         {
             double start_time = omp_get_wtime();  // Measure time taken by each thread
@@ -314,17 +321,9 @@ int main(int argc, char *argv[]) {
             /* Getting First Timestamp (to create [ms] bins) */ 
             #ifdef HISTOGRAMS
 
-                uint64_t first_timestamp = 0;
                 int is_first_row = 1;
 
-                if (thread_id == 0) {
-                    fread(&first_timestamp, sizeof(uint64_t), 1, local_file);
-                    #ifdef DEBUGGER
-                        printf("*** Very First Timestamp: %lu\n", first_timestamp);
-                    #endif
-                } else {
-                    fseek(local_file, start_pos, SEEK_SET);
-                }
+                fseek(local_file, start_pos, SEEK_SET);
 
                 rewind(local_file);
                 fseek(local_file, start_pos, SEEK_SET);
@@ -348,7 +347,7 @@ int main(int argc, char *argv[]) {
                         is_first_row = 0;
                     }
 
-                    unsigned int ms_interval = (timestamp - first_timestamp) / 1000;
+                    uint64_t ms_interval = (timestamp - first_timestamp) / 1000;
                     if (ms_interval < MILLIS) {
                         occurrences_private[thread_id * MILLIS + ms_interval]++;
                     }
@@ -382,18 +381,27 @@ int main(int argc, char *argv[]) {
         #ifdef HISTOGRAMS
         unsigned int occurrences[MILLIS] = {0};  // Final array to store the results
 
-        #pragma omp target data map(to: occurrences_private[0:num_threads * MILLIS]) \
-                            map(from: occurrences[0:MILLIS])
-        {
-            #pragma omp target teams distribute parallel for reduction(+:occurrences[:MILLIS])
-            for (int j = 0; j < MILLIS; j++) {
-                unsigned int sum = 0;
-                for (int i = 0; i < num_threads; i++) {
-                    sum += occurrences_private[i * MILLIS + j];
+            #pragma omp target data map(to: occurrences_private[0:num_threads * MILLIS]) \
+                                map(from: occurrences[0:MILLIS])
+            {
+                
+                /****************************************************************************************/
+                /*                            OFFLOADING ARRAY OPERATION TO GPU                         */
+                /****************************************************************************************/
+                #pragma omp target teams distribute parallel for reduction(+:occurrences[:MILLIS])
+                for (int j = 0; j < MILLIS; j++) {
+                    unsigned int sum = 0;
+                    for (int i = 0; i < num_threads; i++) {
+                        sum += occurrences_private[i * MILLIS + j];
+                    }
+                    occurrences[j] = sum;
+                    #ifdef DEBUGGER
+                        if(j > MILLIS/num_threads*99/100 && j < MILLIS/num_threads*101/100){
+                            printf("Total occurrences at [ms] %d: %d\n", j, sum);
+                        }
+                    #endif
                 }
-                occurrences[j] = sum;
             }
-        }
         #endif
 
         #ifdef HEATMAPS
@@ -408,6 +416,9 @@ int main(int argc, char *argv[]) {
                 heatmap_2d[i] = data_block_2d + (i * HEIGHT);
             }
 
+            /****************************************************************************************/
+            /*                            OFFLOADING MATRIX OPERATION TO GPU                        */
+            /****************************************************************************************/
             #pragma omp target data map(to: heatmap_3d[0:num_threads * WIDTH * HEIGHT]) \
                                 map(from: heatmap_2d[0:WIDTH * HEIGHT])
             {
@@ -422,6 +433,7 @@ int main(int argc, char *argv[]) {
                     }
                 }
             }
+
         #endif
 
         

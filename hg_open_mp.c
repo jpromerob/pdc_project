@@ -35,54 +35,23 @@ void get_base_name(const char *input_filename, char *base_name) {
     base_name[dot - last_slash - 1] = '\0';
 }
 
-// Function to print the current date and time with milliseconds
-void print_current_datetime() {
-
-
-    struct timeval tv;
-    struct tm* local_time;
-    
-    // Get the current time with microsecond precision
-    gettimeofday(&tv, NULL);
-    
-    // Convert the current time to local time
-    local_time = localtime(&tv.tv_sec);
-
-    // Print the date, time, and milliseconds
-    printf(" *** *** *** %02d-%02d-%04d %02d:%02d:%02d.%03ld\n",
-           local_time->tm_mday,
-           local_time->tm_mon + 1,
-           local_time->tm_year + 1900,
-           local_time->tm_hour,
-           local_time->tm_min,
-           local_time->tm_sec,
-           tv.tv_usec / 1000);  // Convert microseconds to milliseconds
-}
-
 int main(int argc, char *argv[]) {
 
 
     double all_start_time, all_end_time;
     all_start_time = omp_get_wtime();
 
-    if (argc < 3) {
-        printf("Usage: %s --file <bin_filename> [--threads <num_threads>]\n", argv[0]);
+    if (argc < 2) {
+        printf("Usage: %s --file <bin_filename>\n", argv[0]);
         return 1;
     }
 
     const char *bin_filename = NULL;
-    int num_threads = 1;  // Default to 1 thread
 
     // Parse arguments
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--file") == 0 && i + 1 < argc) {
             bin_filename = argv[i + 1];
-        } else if (strcmp(argv[i], "--threads") == 0 && i + 1 < argc) {
-            num_threads = atoi(argv[i + 1]);  // Convert the number of threads from string to int
-            if (num_threads <= 0) {
-                printf("Error: Number of threads must be a positive integer.\n");
-                return 1;
-            }
         }
     }
 
@@ -115,6 +84,10 @@ int main(int argc, char *argv[]) {
     unsigned int total_events;
     fread(&total_events, sizeof(unsigned int), 1, file);
     printf("Total Events: %u\n", total_events);
+
+    // Determine the number of OpenMP threads
+    int num_threads = omp_get_max_threads();  // Use maximum number of threads allowed by OpenMP runtime
+    printf("Available Threads: %d\n", num_threads);
 
     // Determine events per thread
     int events_per_thread = total_events / num_threads;
@@ -152,6 +125,15 @@ int main(int argc, char *argv[]) {
 
     fclose(file);  // Close the shared file pointer since each thread will open its own
 
+
+
+
+
+
+
+    // PREPARING FOR PARALLELIZATION
+
+
     // Initialize arrays for counting occurrences
     unsigned int occurrences[MILLIS] = {0};  // Final array to store the results
     unsigned int *occurrences_private = malloc(num_threads * MILLIS * sizeof(unsigned int));  // Private arrays for each thread
@@ -159,11 +141,11 @@ int main(int argc, char *argv[]) {
     // Initialize private arrays to zero
     memset(occurrences_private, 0, num_threads * MILLIS * sizeof(unsigned int));
 
+
+
+
     // Set the number of OpenMP threads
     omp_set_num_threads(num_threads);
-
-
-
 
 
     // START OF MAIN PROCESSING 

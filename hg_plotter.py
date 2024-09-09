@@ -1,11 +1,18 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import sys
+import os
 
 def plot_occurrences(file_path, output_png):
     # Load binary data
     data = np.fromfile(file_path, dtype=np.uint32)
-    
-    # Define the number of milliseconds (1000)
+    A = np.mean(data)
+    S = np.std(data)
+
+    # Limit data
+    data = np.clip(data, None, A + 3*S)
+
+    # Define the number of milliseconds (10000)
     num_milliseconds = 10000
     
     if len(data) != num_milliseconds:
@@ -23,4 +30,20 @@ def plot_occurrences(file_path, output_png):
     print(f"Plot saved to {output_png}")
 
 if __name__ == "__main__":
-    plot_occurrences('occurrences.bin', 'occurrences_plot.png')
+    # Check if the input file name is provided
+    if len(sys.argv) != 2:
+        print("Usage: python script_name.py <input_file>")
+        sys.exit(1)
+
+    input_file = sys.argv[1]
+
+    # Create output directory if it doesn't exist
+    output_dir = 'images'
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Determine the output file name by replacing the .bin extension with .png and adding the directory path
+    output_file = os.path.join(output_dir, os.path.splitext(os.path.basename(input_file))[0] + '.png')
+    output_file = "images/whatever.png"
+
+    # Call the plotting function
+    plot_occurrences(input_file, output_file)
