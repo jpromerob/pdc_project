@@ -13,7 +13,7 @@ def plot_occurrences(file_path, output_png):
     data = np.clip(data, None, A + 3*S)
 
     # Define the number of milliseconds (10000)
-    num_milliseconds = 10000
+    num_milliseconds = 2000
     
     if len(data) != num_milliseconds:
         raise ValueError(f"Expected {num_milliseconds} elements, but found {len(data)}")
@@ -43,7 +43,6 @@ if __name__ == "__main__":
 
     # Determine the output file name by replacing the .bin extension with .png and adding the directory path
     output_file = os.path.join(output_dir, os.path.splitext(os.path.basename(input_file))[0] + '.png')
-    output_file = "images/whatever.png"
 
     # Call the plotting function
     plot_occurrences(input_file, output_file)
