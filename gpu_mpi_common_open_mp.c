@@ -11,7 +11,7 @@
 
 #define WIDTH 640
 #define HEIGHT 480
-#define MILLIS 10000  // Number of milliseconds for the output array
+#define MILLIS 2000  // Number of milliseconds for the output array
 #define EVENT_SIZE_BYTES 12  // Each event is 96 bits = 12 bytes
 #define MAX_FILENAME_LENGTH 256
 #define MAX_FOLDER_LENGTH 32
@@ -431,19 +431,41 @@ int main(int argc, char *argv[]) {
             /****************************************************************************************/
             /*                            OFFLOADING MATRIX OPERATION TO GPU                        */
             /****************************************************************************************/
+            // #ifdef OFFLOADGPU
+            // #pragma omp target data map(to: heatmap_3d[0:num_threads * WIDTH * HEIGHT]) \
+            //                     map(from: heatmap_2d[0:WIDTH * HEIGHT])
+            // {
+            //     #pragma omp target teams distribute parallel for
+            // #endif // OFFLOADGPU
+            //     for (int x = 0; x < WIDTH; x++) {
+            //         for (int y = 0; y < HEIGHT; y++) {
+            //             unsigned int sum = 0;
+            //             for (int i = 0; i < num_threads; i++) {
+            //                 sum += heatmap_3d[i][x][y];
+            //             }
+            //             heatmap_2d[x][y] = sum;
+            //         }
+            //     }
+            // #ifdef OFFLOADGPU
+            // }
+            // #endif // OFFLOADGPU
             #ifdef OFFLOADGPU
-            #pragma omp target data map(to: heatmap_3d[0:num_threads * WIDTH * HEIGHT]) \
-                                map(from: heatmap_2d[0:WIDTH * HEIGHT])
+            // Map the base pointers and the data blocks to the GPU
+            #pragma omp target data map(to: heatmap_3d[0:num_threads]) \
+                                map(to: data_block_3d[0:num_threads * WIDTH * HEIGHT]) \
+                                map(from: data_block_2d[0:WIDTH * HEIGHT])
             {
-                #pragma omp target teams distribute parallel for
+                // Offload computation to GPU
+                #pragma omp target teams distribute parallel for collapse(2)
             #endif // OFFLOADGPU
                 for (int x = 0; x < WIDTH; x++) {
                     for (int y = 0; y < HEIGHT; y++) {
                         unsigned int sum = 0;
                         for (int i = 0; i < num_threads; i++) {
-                            sum += heatmap_3d[i][x][y];
+                            // Use directly the data block to avoid potential issues with pointer dereferencing
+                            sum += data_block_3d[(i * WIDTH * HEIGHT) + (x * HEIGHT) + y];
                         }
-                        heatmap_2d[x][y] = sum;
+                        data_block_2d[x * HEIGHT + y] = sum;
                     }
                 }
             #ifdef OFFLOADGPU
